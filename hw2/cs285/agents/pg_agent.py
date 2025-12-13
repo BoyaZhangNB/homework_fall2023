@@ -68,11 +68,11 @@ class PGAgent(nn.Module):
         # way. obs, actions, rewards, terminals, and q_values should all be arrays with a leading dimension of `batch_size`
         # beyond this point.
 
-        obs = np.stack(obs)
-        actions = np.stack(actions)
-        rewards = np.stack(rewards)
-        terminals = np.stack(terminals)
-        q_values = np.stack(q_values)
+        obs = np.concatenate(obs)
+        actions = np.concatenate(actions)
+        rewards = np.concatenate(rewards)
+        terminals = np.concatenate(terminals)
+        q_values = np.concatenate(q_values)
 
         # step 2: calculate advantages from Q values
         advantages: np.ndarray = self._estimate_advantage(
@@ -86,8 +86,9 @@ class PGAgent(nn.Module):
         # step 4: if needed, use all datapoints (s_t, a_t, q_t) to update the PG critic/baseline
         if self.critic is not None:
             # TODO: perform `self.baseline_gradient_steps` updates to the critic/baseline network
-            critic_info: dict = self.critic.update(obs, q_values)
-            info.update(critic_info)
+            for _ in range(self.baseline_gradient_steps):
+                critic_info: dict = self.critic.update(obs, q_values)
+                info.update(critic_info)
 
         return info
 
@@ -99,12 +100,12 @@ class PGAgent(nn.Module):
             # trajectory at each point.
             # In other words: Q(s_t, a_t) = sum_{t'=0}^T gamma^t' r_{t'}
             # TODO: use the helper function self._discounted_return to calculate the Q-values
-            q_values = [self._discounted_return(reward) for reward in rewards]
+            q_values = [np.array(self._discounted_return(reward)) for reward in rewards]
         else:
             # Case 2: in reward-to-go PG, we only use the rewards after timestep t to estimate the Q-value for (s_t, a_t).
             # In other words: Q(s_t, a_t) = sum_{t'=t}^T gamma^(t'-t) * r_{t'}
             # TODO: use the helper function self._discounted_reward_to_go to calculate the Q-values
-            q_values = [self._discounted_reward_to_go(reward) for reward in rewards]
+            q_values = [np.array(self._discounted_reward_to_go(reward)) for reward in rewards]
 
         return q_values
 
@@ -124,7 +125,8 @@ class PGAgent(nn.Module):
             advantages = q_values
         else:
             # TODO: run the critic and use it as a baseline
-            values = self.critic.forward(obs)
+            obs = ptu.from_numpy(obs)
+            values = self.critic.forward(obs).detach().cpu().numpy()
             assert values.shape == q_values.shape
 
             if self.gae_lambda is None:
@@ -134,27 +136,24 @@ class PGAgent(nn.Module):
                 # TODO: implement GAE
                 batch_size = obs.shape[0] # N trajectories
 
-                advantages = []
+                # HINT: append a dummy T+1 value for simpler recursive calculation
+                values = np.append(values, [0])
+                advantages = np.zeros(batch_size + 1)
 
-                for i in range(batch_size):
+                for i in reversed(range(batch_size)):
                     # TODO: recursively compute advantage estimates starting from timestep T.
                     # HINT: use terminals to handle edge cases. terminals[i] is 1 if the state is the last in its
                     # trajectory, and 0 otherwise.
-                    terminal = terminals[i]
-                    reward = rewards[i]
-                    value = values[i]
-                    # HINT: append a dummy T+1 value for simpler recursive calculation
-                    value = np.append(value, [0])
-                    advantage = np.zeros(value.shape[0])
 
-                    for t in reversed(range(reward.shape[0])):
-                        delta = reward[t] + self.gamma * value[t+1] - value[t]
-                        advantage[t] = delta + self.gamma * self.gae_lambda * advantage[t+1]
-
-                    advantages.append(advantage)
-                
-                advantages = np.stack(advantages)
-
+                    if terminals[i] == 1:
+                        # Terminal state: do NOT bootstrap value[i+1]
+                        delta = rewards[i] - values[i]
+                        advantages[i] = delta  # reset recursion
+                    else:
+                        # Non-terminal: bootstrap from next V
+                        delta = rewards[i] + self.gamma * values[i+1] - values[i]
+                        advantages[i] = delta + self.gamma * self.gae_lambda * advantages[i+1]
+                        
                 # remove dummy advantage
                 advantages = advantages[:-1]
 
@@ -172,7 +171,8 @@ class PGAgent(nn.Module):
         Note that all entries of the output list should be the exact same because each sum is from 0 to T (and doesn't
         involve t)!
         """
-        return [sum(self.gamma ** step * rewards[step] for step in range(len(rewards))) for t in range(len(rewards))]
+        discounted_sum = sum(self.gamma ** step * rewards[step] for step in range(len(rewards)))
+        return [discounted_sum for t in range(len(rewards))]
 
 
     def _discounted_reward_to_go(self, rewards: Sequence[float]) -> Sequence[float]:

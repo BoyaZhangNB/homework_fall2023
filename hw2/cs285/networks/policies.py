@@ -59,10 +59,11 @@ class MLPPolicy(nn.Module):
     def get_action(self, obs: np.ndarray) -> np.ndarray:
         """Takes a single observation (as a numpy array) and returns a single action (as a numpy array)."""
         # TODO: implement get_action
+        obs = ptu.from_numpy(obs)
         dist = self.forward(obs)
         action = dist.sample()
 
-        return action
+        return action.detach().cpu().numpy() 
 
     def forward(self, obs: torch.FloatTensor) -> torch.distributions.Distribution:
         """
@@ -72,11 +73,11 @@ class MLPPolicy(nn.Module):
         """
         if self.discrete:
             # TODO: define the forward pass for a policy with a discrete action space.
-            logits = self.logits_net.forward(obs)
+            logits = self.logits_net(obs)
             dist = distributions.Categorical(logits=logits)
         else:
             # TODO: define the forward pass for a policy with a continuous action space.
-            mean = self.mean_net.forward(obs)
+            mean = self.mean_net(obs)
             std = torch.exp(self.logstd)
             dist = distributions.Normal(mean, std)
 
@@ -87,38 +88,35 @@ class MLPPolicy(nn.Module):
         raise NotImplementedError
 
 
-    class MLPPolicyPG(MLPPolicy):
-        """Policy subclass for the policy gradient algorithm."""
+class MLPPolicyPG(MLPPolicy):
+    """Policy subclass for the policy gradient algorithm."""
 
-        def update(
-            self,
-            obs: np.ndarray,
-            actions: np.ndarray,
-            advantages: np.ndarray,
-        ) -> dict:
-            """Implements the policy gradient actor update."""
-            obs = ptu.from_numpy(obs)
-            actions = ptu.from_numpy(actions)
-            advantages = ptu.from_numpy(advantages)
+    def update(
+        self,
+        obs: np.ndarray,
+        actions: np.ndarray,
+        advantages: np.ndarray,
+    ) -> dict:
+        """Implements the policy gradient actor update."""
+        obs = ptu.from_numpy(obs)
+        actions = ptu.from_numpy(actions)
+        advantages = ptu.from_numpy(advantages)
 
-            # Get action distribution from forward pass
-            if self.discrete:
-                action_distribution = self.forward(obs)
-            else:
-                action_distribution = self.forwad(obs)
-            
-            # Compute log probabilities of taken actions
-            log_probs = action_distribution.log_prob(actions)
 
-            if not self.discrete:
-                log_probs = log_probs.sum(dim=-1)
+        action_distribution = self.forward(obs)
+        
+        # Compute log probabilities of taken actions
+        log_probs = action_distribution.log_prob(actions)
 
-            loss = -(log_probs * advantages).mean()
+        if not self.discrete:
+            log_probs = log_probs.sum(dim=-1)
 
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
+        loss = -(log_probs * advantages).mean()
 
-            return {
-                "Actor Loss": ptu.to_numpy(loss),
-            }
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {
+            "Actor Loss": ptu.to_numpy(loss),
+        }
