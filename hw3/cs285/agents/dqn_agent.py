@@ -48,7 +48,9 @@ class DQNAgent(nn.Module):
         observation = ptu.from_numpy(np.asarray(observation))[None]
 
         # TODO(student): get the action from the critic using an epsilon-greedy strategy
-        action = ...
+        explore = (torch.rand(1) < epsilon).item()
+        qa_values = torch.stack([self.critic(observation)])
+        action = torch.randint(0, self.num_actions, (1,)) if explore else torch.argmax(qa_values, dim=-1)
 
         return ptu.to_numpy(action).squeeze(0).item()
 
@@ -66,20 +68,22 @@ class DQNAgent(nn.Module):
         # Compute target values
         with torch.no_grad():
             # TODO(student): compute target values
-            next_qa_values = ...
-
             if self.use_double_q:
-                raise NotImplementedError
+                next_qa_values = self.critic(next_obs)
+                next_action = torch.argmax(next_qa_values, dim=-1).unsqueeze(-1)
+                next_q_values = torch.gather(self.target_critic(next_obs), 1, next_action).squeeze(-1)
             else:
-                next_action = ...
+                next_qa_values = self.target_critic(next_obs)
+                next_action = torch.argmax(next_qa_values, dim=-1).unsqueeze(-1)
+                next_q_values = torch.gather(next_qa_values, 1, next_action).squeeze(-1)
+
+            assert next_q_values.shape == (batch_size,), "q_value shape mismatch: " + str(next_q_values.shape)
             
-            next_q_values = ...
-            target_values = ...
+            target_values = reward + self.discount * next_q_values * (1 - done.int())
 
         # TODO(student): train the critic with the target values
-        qa_values = ...
-        q_values = ... # Compute from the data actions; see torch.gather
-        loss = ...
+        q_values = torch.gather(self.critic(obs), 1, action.unsqueeze(-1)).squeeze(-1)
+        loss = self.critic_loss(q_values, target_values)
 
 
         self.critic_optimizer.zero_grad()
@@ -114,5 +118,9 @@ class DQNAgent(nn.Module):
         Update the DQN agent, including both the critic and target.
         """
         # TODO(student): update the critic, and the target if needed
+        critic_stats = self.update_critic(obs, action, reward, next_obs, done)
+
+        if step % self.target_update_period == 0:
+            self.update_target_critic()
 
         return critic_stats
