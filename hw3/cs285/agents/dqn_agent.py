@@ -68,14 +68,14 @@ class DQNAgent(nn.Module):
         # Compute target values
         with torch.no_grad():
             # TODO(student): compute target values
+            next_qa_values = self.target_critic(next_obs)
+
             if self.use_double_q:
-                next_qa_values = self.critic(next_obs)
-                next_action = torch.argmax(next_qa_values, dim=-1).unsqueeze(-1)
-                next_q_values = torch.gather(self.target_critic(next_obs), 1, next_action).squeeze(-1)
-            else:
-                next_qa_values = self.target_critic(next_obs)
-                next_action = torch.argmax(next_qa_values, dim=-1).unsqueeze(-1)
+                next_action = torch.argmax(self.critic(next_obs), dim=-1).unsqueeze(-1)
                 next_q_values = torch.gather(next_qa_values, 1, next_action).squeeze(-1)
+            else:
+                next_q_values = next_qa_values.max(dim=-1).values
+                
 
             assert next_q_values.shape == (batch_size,), "q_value shape mismatch: " + str(next_q_values.shape)
             
