@@ -241,7 +241,7 @@ class SoftActorCritic(nn.Module):
         # Note: Think about whether to use .rsample() or .sample() here...
         action = action_distribution.rsample()
         entropy = -action_distribution.log_prob(action)
-        return entropy
+        return entropy.sum(dim=-1)
     
     def actor_loss_reinforce(self, obs: torch.Tensor):
         batch_size = obs.shape[0]
