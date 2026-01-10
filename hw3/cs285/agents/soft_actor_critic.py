@@ -221,10 +221,11 @@ class SoftActorCritic(nn.Module):
         assert q_values.shape == (self.num_critic_networks, batch_size), q_values.shape
 
         # Compute loss
-        loss: torch.Tensor = torch.mean(self.critic_loss(q_values, target_values))
+        loss: torch.Tensor = self.critic_loss(q_values, target_values)
 
         self.critic_optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.critics.parameters(), max_norm=1.0)
         self.critic_optimizer.step()
 
         return {
@@ -239,9 +240,15 @@ class SoftActorCritic(nn.Module):
         """
         # TODO(student): Compute the entropy of the action distribution.
         # Note: Think about whether to use .rsample() or .sample() here...
+
         action = action_distribution.rsample()
+
         entropy = -action_distribution.log_prob(action)
-        return entropy.sum(dim=-1)
+
+        batch_size = entropy.shape[0]
+        assert entropy.shape == (batch_size,), entropy.shape
+
+        return entropy
     
     def actor_loss_reinforce(self, obs: torch.Tensor):
         batch_size = obs.shape[0]
@@ -267,13 +274,16 @@ class SoftActorCritic(nn.Module):
             ), q_values.shape
 
             # Our best guess of the Q-values is the mean of the ensemble
-            q_values = torch.mean(q_values, axis=0)
+            q_values = torch.mean(q_values, dim=0)
             advantage = q_values
+            assert advantage.shape == q_values.shape
 
         # Do REINFORCE: calculate log-probs and use the Q-values
         # TODO(student)
-        log_probs = torch.stack([action_distribution.log_prob(action[i]) for i in range(self.num_actor_samples)], dim=0)
-        loss = torch.mean(-log_probs * advantage)
+        log_probs = torch.stack([action_distribution.log_prob(act) for act in action], dim=0)
+        assert log_probs.shape == advantage.shape, f"{log_probs.shape}, {advantage.shape}"
+
+        loss = torch.mean((-log_probs * advantage).mean(dim=0))
 
         return loss, torch.mean(self.entropy(action_distribution))
 
@@ -312,6 +322,7 @@ class SoftActorCritic(nn.Module):
 
         self.actor_optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
         self.actor_optimizer.step()
 
         return {"actor_loss": loss.item(), "entropy": entropy.item()}
