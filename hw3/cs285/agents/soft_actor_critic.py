@@ -151,7 +151,7 @@ class SoftActorCritic(nn.Module):
         if self.target_critic_backup_type == "doubleq":
             next_qs = next_qs[[1, 0], :]
         elif self.target_critic_backup_type == "min":
-            next_qs = torch.min(next_qs, dim=0, keepdim=True).values
+            next_qs = torch.min(next_qs, dim=0).values
         elif self.target_critic_backup_type == "mean":
             next_qs = torch.mean(next_qs, dim=0, keepdim=True)
         else:
