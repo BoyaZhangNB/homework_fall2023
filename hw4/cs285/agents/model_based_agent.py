@@ -96,10 +96,9 @@ class ModelBasedAgent(nn.Module):
         obs_delta = next_obs - obs
         obs_delta_norm = (obs_delta - self.obs_delta_mean) / (self.obs_delta_std + 1e-8)
         
-        outputs = [model(obs_acs_norm) for model in self.dynamics_models]
+        output = self.dynamics_models[i](obs_acs_norm)
 
-        loss = [self.loss_fn(output, obs_delta_norm) for output in outputs]
-        loss = torch.stack(loss).mean()
+        loss = self.loss_fn(output, obs_delta_norm)
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -146,9 +145,9 @@ class ModelBasedAgent(nn.Module):
         # Same hints as `update` above, avoid nasty divide-by-zero errors when
         # normalizing inputs!
 
-        obs_acs_norm = (torch.cat([obs, acs], dim=1) - torch.tile(self.obs_acs_mean, (self.ob_dim + self.ac_dim, obs.shape[0]))) / (self.obs_acs_std + 1e-8)
+        obs_acs_norm = (torch.cat([obs, acs], dim=1) - self.obs_acs_mean) / (self.obs_acs_std + 1e-8)
         obs_delta_norm = self.dynamics_models[i](obs_acs_norm)
-        obs_delta = obs_delta_norm * self.obs_acs_std + self.obs_acs_mean
+        obs_delta = obs_delta_norm * self.obs_delta_std + self.obs_delta_mean
 
         pred_next_obs = obs + obs_delta
 
@@ -189,7 +188,7 @@ class ModelBasedAgent(nn.Module):
 
             # TODO(student): predict the next_obs for each rollout
             # HINT: use self.get_dynamics_predictions
-            next_obs = np.stack([self.get_dynamics_predictions(i, obs, acs) for i in range(self.ensemble_size)])
+            next_obs = np.stack([self.get_dynamics_predictions(i, obs[i], acs) for i in range(self.ensemble_size)])
             assert next_obs.shape == (
                 self.ensemble_size,
                 self.mpc_num_action_sequences,
@@ -202,11 +201,16 @@ class ModelBasedAgent(nn.Module):
             # respectively, and returns a tuple of `(rewards, dones)`. You can 
             # ignore `dones`. You might want to do some reshaping to make
             # `next_obs` and `acs` 2-dimensional.
-            rewards = self.env.get_reward(
-                next_obs.view(self.ensemble_size * self.mpc_num_action_sequences, self.ob_dim),
-                acs.view(self.ensemble_size * self.mpc_num_action_sequences, self.ac_dim))
+            assert isinstance(next_obs, np.ndarray), "Not numpy array"
+
+            rewards, _ = self.env.get_reward(
+                next_obs.reshape(self.ensemble_size * self.mpc_num_action_sequences, self.ob_dim),
+                np.tile(acs, (self.ensemble_size, 1))
+            )
             
-            assert rewards.shape == (self.ensemble_size, self.mpc_num_action_sequences)
+            rewards = rewards.reshape(self.ensemble_size, self.mpc_num_action_sequences)
+            
+            assert rewards.shape == (self.ensemble_size, self.mpc_num_action_sequences), rewards.shape
 
             sum_of_rewards += rewards
 
