@@ -245,6 +245,42 @@ class ModelBasedAgent(nn.Module):
                 # TODO(student): implement the CEM algorithm
                 # HINT: you need a special case for i == 0 to initialize
                 # the elite mean and std
-                pass
+                rewards = self.evaluate_action_sequences(obs, action_sequences)
+                assert rewards.shape == (self.mpc_num_action_sequences,)
+                
+                # Get indices of top cem_num_elites rewards
+                best_indices = np.argsort(rewards)[-self.cem_num_elites:]
+                
+                # Update elite mean and std
+                if i == 0:
+                    elite_mean = np.mean(action_sequences[best_indices], axis=0)
+                    elite_std = np.std(action_sequences[best_indices], axis=0)
+                else:
+                    new_elite_mean = np.mean(action_sequences[best_indices], axis=0)
+                    new_elite_std = np.std(action_sequences[best_indices], axis=0)
+                    elite_mean = self.cem_alpha * new_elite_mean + (1 - self.cem_alpha) * elite_mean
+                    elite_std = self.cem_alpha * new_elite_std + (1 - self.cem_alpha) * elite_std
+                
+                # Re-sample action sequences from the elite distribution (except on last iteration)
+                if i < self.cem_num_iters - 1:
+                    action_sequences = np.random.normal(
+                        elite_mean, 
+                        elite_std, 
+                        size=(self.mpc_num_action_sequences, self.mpc_horizon, self.ac_dim)
+                    )
+                    # Clip to action space bounds
+                    action_sequences = np.clip(
+                        action_sequences,
+                        self.env.action_space.low,
+                        self.env.action_space.high
+                    )
+            
+            # Return the first action from the elite mean trajectory, clipped to bounds
+            best_action = np.clip(
+                elite_mean[0],
+                self.env.action_space.low,
+                self.env.action_space.high
+            )
+            return best_action
         else:
             raise ValueError(f"Invalid MPC strategy '{self.mpc_strategy}'")
