@@ -44,6 +44,10 @@ def collect_mbpo_rollout(
         # HINT: get actions from `sac_agent` and `next_ob` predictions from `mb_agent`.
         # Average the ensemble predictions directly to get the next observation.
         # Get the reward using `env.get_reward`.
+        ac = sac_agent.get_action(ob)
+        next_ob = np.stack([mb_agent.get_dynamics_predictions(i, np.expand_dims(ob, axis=0), np.expand_dims(ac, axis=0)) for i in range(mb_agent.ensemble_size)]).mean(axis=0)[0]
+        assert next_ob.shape == (mb_agent.ob_dim,), f"MBPO observation shape mismatch: {next_ob.shape}"
+        rew, _ = env.get_reward(ob, ac)
 
         obs.append(ob)
         acs.append(ac)
@@ -166,13 +170,14 @@ def run_training_loop(
             # TODO(student): train the dynamics models
             # HINT: train each dynamics model in the ensemble with a *different* batch of transitions!
             # Use `replay_buffer.sample` with config["train_batch_size"].
-            for i in range(actor_agent.ensemble_size):
+            for i in range(mb_agent.ensemble_size):
                 transitions = replay_buffer.sample(config['train_batch_size'])
 
-                loss_per_model = actor_agent.update(i, 
+                loss_per_model = mb_agent.update(i, 
                                    transitions['observations'],
                                    transitions['actions'],
-                                   transitions['next_observations'])
+                                   transitions['next_observations'],
+                                   )
                 
                 step_losses.append(loss_per_model)
 
@@ -216,6 +221,9 @@ def run_training_loop(
                     )
                 # train SAC
                 batch = sac_replay_buffer.sample(sac_config["batch_size"])
+
+                batch = ptu.from_numpy(batch)
+
                 sac_agent.update(
                     batch["observations"],
                     batch["actions"],
