@@ -1,73 +1,79 @@
-## Setup
+# HW1: Imitation Learning (Behavior Cloning + DAgger)
 
-You can run this code on your own machine or on Google Colab. 
+## Scope
+This homework implements supervised imitation learning for continuous-control MuJoCo tasks.
 
-1. **Local option:** If you choose to run locally, you will need to install MuJoCo and some Python packages; see [installation.md](installation.md) for instructions.
-2. **Colab:** The first few sections of the notebook will install all required dependencies. You can try out the Colab option by clicking the badge below:
+Implemented methods:
+- Behavior Cloning (BC)
+- Dataset Aggregation (DAgger)
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/berkeleydeeprlcourse/homework_fall2023/blob/master/hw1/cs285/scripts/run_hw1.ipynb)
+Key code paths:
+- `cs285/policies/MLP_policy.py`
+- `cs285/infrastructure/utils.py`
+- `cs285/scripts/run_hw1.py`
 
-## Complete the code
+## RL Methods and Equations Used
 
-Fill in sections marked with `TODO`. In particular, edit
- - [policies/MLP_policy.py](cs285/policies/MLP_policy.py)
- - [infrastructure/utils.py](cs285/infrastructure/utils.py)
- - [scripts/run_hw1.py](cs285/scripts/run_hw1.py)
+### 1) Behavior Cloning (supervised policy regression)
+The policy is an MLP that predicts continuous actions from observations.
 
-You have the option of running locally or on Colab using
- - [scripts/run_hw1.py](cs285/scripts/run_hw1.py) (if running locally) or [scripts/run_hw1.ipynb](cs285/scripts/run_hw1.ipynb) (if running on Colab)
+Training objective implemented in `MLPPolicySL.update`:
 
-See the homework pdf for more details.
+\[
+\mathcal{L}_{BC}(\theta)
+= \frac{1}{N}\sum_{i=1}^N \left\|\pi_\theta(s_i)-a_i^{expert}\right\|_2^2
+\]
 
-## Run the code
+This is standard MSE regression onto expert actions.
 
-Tip: While debugging, you probably want to keep the flag `--video_log_freq -1` which will disable video logging and speed up the experiment. However, feel free to remove it to save videos of your awesome policy!
+### 2) DAgger data aggregation loop
+In later iterations (`itr > 0`), trajectories are sampled from the current learner policy, then relabeled with expert actions, and appended to replay data.
 
-If running on Colab, adjust the `#@params` in the `Args` class according to the commmand line arguments above.
+Conceptually:
 
-### Section 1 (Behavior Cloning)
-Command for problem 1:
+\[
+\mathcal{D} \leftarrow \mathcal{D} \cup \{(s, \pi_E(s))\;|\; s\sim d_{\pi_\theta}\}
+\]
 
-```
+The policy is repeatedly retrained on aggregated data using the same BC loss.
+
+## Training Pipeline
+- Iteration 0:
+	- load expert dataset from `cs285/expert_data/*.pkl`
+	- train policy via BC objective
+- Iterations 1..T (when `--do_dagger`):
+	- roll out current learner
+	- relabel observed states with expert actions
+	- append to replay buffer
+	- sample minibatches and train by supervised MSE
+
+## Run
+
+### Behavior Cloning
+```bash
 python cs285/scripts/run_hw1.py \
 	--expert_policy_file cs285/policies/experts/Ant.pkl \
-	--env_name Ant-v4 --exp_name bc_ant --n_iter 1 \
+	--env_name Ant-v4 \
+	--exp_name bc_ant \
+	--n_iter 1 \
 	--expert_data cs285/expert_data/expert_data_Ant-v4.pkl \
 	--video_log_freq -1
 ```
 
-Make sure to also try another environment.
-See the homework PDF for more details on what else you need to run.
-To generate videos of the policy, remove the `--video_log_freq -1` flag.
-
-### Section 2 (DAgger)
-Command for section 1:
-(Note the `--do_dagger` flag, and the higher value for `n_iter`)
-
-```
+### DAgger
+```bash
 python cs285/scripts/run_hw1.py \
-    --expert_policy_file cs285/policies/experts/Ant.pkl \
-    --env_name Ant-v4 --exp_name dagger_ant --n_iter 10 \
-    --do_dagger --expert_data cs285/expert_data/expert_data_Ant-v4.pkl \
+	--expert_policy_file cs285/policies/experts/Ant.pkl \
+	--env_name Ant-v4 \
+	--exp_name dagger_ant \
+	--n_iter 10 \
+	--do_dagger \
+	--expert_data cs285/expert_data/expert_data_Ant-v4.pkl \
 	--video_log_freq -1
 ```
 
-Make sure to also try another environment.
-See the homework PDF for more details on what else you need to run.
+## Notes
+- `sample_trajectory` in `cs285/infrastructure/utils.py` uses the old Gym step API.
+- Logging includes train/eval returns and optional rollout videos.
 
-## Visualization the saved tensorboard event file:
-
-You can visualize your runs using tensorboard:
-```
-tensorboard --logdir data
-```
-
-You will see scalar summaries as well as videos of your trained policies (in the 'images' tab).
-
-You can choose to visualize specific runs with a comma-separated list:
-```
-tensorboard --logdir data/run1,data/run2,data/run3...
-```
-
-If running on Colab, you will be using the `%tensorboard` [line magic](https://ipython.readthedocs.io/en/stable/interactive/magics.html) to do the same thing; see the [notebook](cs285/scripts/run_hw1.ipynb) for more details.
 
